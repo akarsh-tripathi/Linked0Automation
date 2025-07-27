@@ -2,11 +2,10 @@ import time
 import pickle
 import random
 import logging
-import tempfile
-import shutil
 import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from bot.connect import try_connect
 from bot.decision import DecisionEngine
@@ -23,17 +22,20 @@ decision_engine = DecisionEngine(PROMPT)
 def run_bot():
     logger.info("Starting LinkedIn bot...")
     
-    # Configure Chrome options without user-data-dir
+    # Kill any existing Chrome processes first
+    try:
+        os.system("pkill -f chrome")
+        logger.info("Killed any existing Chrome processes")
+        time.sleep(2)
+    except Exception as e:
+        logger.warning(f"Error killing Chrome processes: {e}")
+    
+    # Configure Chrome options with minimal settings
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-web-security")
-    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--disable-plugins")
-    chrome_options.add_argument("--disable-images")
-    chrome_options.add_argument("--incognito")
+    chrome_options.add_argument("--remote-debugging-port=0")  # Use random port
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -46,9 +48,11 @@ def run_bot():
     
     driver = None
     try:
-        driver = webdriver.Chrome(options=chrome_options)
+        # Create Chrome service
+        service = Service()
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        logger.info("Chrome driver initialized with custom options")
+        logger.info("Chrome driver initialized successfully")
         
         driver.get("https://www.linkedin.com/")
         logger.info("Navigated to LinkedIn homepage")
@@ -121,10 +125,9 @@ def run_bot():
             except Exception as e:
                 logger.warning(f"Error closing driver: {e}")
         
-        # Clean up temporary directory
+        # Kill any remaining Chrome processes
         try:
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
-                logger.info(f"Cleaned up temporary directory: {temp_dir}")
+            os.system("pkill -f chrome")
+            logger.info("Cleaned up any remaining Chrome processes")
         except Exception as e:
-            logger.warning(f"Error cleaning up temp directory: {e}")
+            logger.warning(f"Error in final Chrome cleanup: {e}")

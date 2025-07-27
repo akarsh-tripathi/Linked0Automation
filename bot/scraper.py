@@ -23,21 +23,23 @@ decision_engine = DecisionEngine(PROMPT)
 def run_bot():
     logger.info("Starting LinkedIn bot...")
     
-    # Create a unique temporary directory for this session
-    temp_dir = tempfile.mkdtemp(prefix="chrome_user_data_")
-    logger.info(f"Created temporary Chrome user data directory: {temp_dir}")
-    
-    # Configure Chrome options
+    # Configure Chrome options without user-data-dir
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-web-security")
     chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-    chrome_options.add_argument(f"--user-data-dir={temp_dir}")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-plugins")
+    chrome_options.add_argument("--disable-images")
+    chrome_options.add_argument("--incognito")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # Add user agent to look more like a real browser
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     # Uncomment the next line if you want to run in headless mode (no GUI)
     # chrome_options.add_argument("--headless")

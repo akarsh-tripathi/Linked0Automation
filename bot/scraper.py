@@ -3,6 +3,7 @@ import pickle
 import random
 import logging
 import os
+import uuid
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -11,246 +12,122 @@ from bot.connect import try_connect
 from bot.decision import DecisionEngine
 from bot.logger import log_to_sheet
 from bot.humanizer import random_click, random_scroll
-import uuid
-
 
 logger = logging.getLogger(__name__)
 
-# Initialize decision engine with a default prompt
-# TODO: This should be configurable
 PROMPT = "I want to connect to people who are hiring for Software Engineer roles with experience of more than 1 year"
 decision_engine = DecisionEngine(PROMPT)
 
 
 def run_bot():
-    logger.info("Starting LinkedIn bot...")
+    logger.info("🔁 Starting LinkedIn bot session...")
 
-    # Kill any existing Chrome processes first (optional, if only running one instance)
-    try:
-        os.system("pkill -f chrome")
-        logger.info("Killed any existing Chrome processes")
-        time.sleep(2)
-    except Exception as e:
-        logger.warning(f"Error killing Chrome processes: {e}")
+    # Kill chrome processes
+    os.system("pkill -f chrome || true")
+    logger.info("🛑 Killed any existing Chrome processes")
+    time.sleep(1)
 
-    # Configure Chrome options
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-software-rasterizer")
+    chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    chrome_options.add_argument("--js-flags=--max-old-space-size=512")
+
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
 
-    # Use a random user data directory each time to avoid profile conflicts
-    temp_profile = f"/tmp/profile_{uuid.uuid4()}"
-    chrome_options.add_argument(f"--user-data-dir={temp_profile}")
-
-    # Add user agent to look more like a real browser
+    # Anti-detection and unique profile
+    chrome_options.add_argument(f"--user-data-dir=/tmp/profile_{uuid.uuid4()}")
     chrome_options.add_argument(
         "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 
-    # Enable headless mode if running on a cloud server (uncomment this in EC2!)
+    # Headless mode for EC2
     chrome_options.add_argument("--headless=new")
 
     driver = None
     try:
         service = Service()
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.execute_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-        logger.info("Chrome driver initialized successfully")
+        for attempt in range(3):
+            try:
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                driver.execute_script(
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+                )
+                logger.info("✅ Chrome driver initialized")
+                break
+            except Exception as e:
+                logger.warning(f"Retry {attempt+1}/3 - Chrome init failed: {e}")
+                time.sleep(2)
 
+        if not driver:
+            raise Exception("Failed to initialize Chrome after 3 attempts")
+
+        # Load LinkedIn and inject cookies
         driver.get("https://www.linkedin.com/")
-        logger.info("Navigated to LinkedIn homepage")
         time.sleep(3)
-
-        # Inject cookies
         try:
-            for cookie in pickle.load(open("config/cookies.pkl", "rb")):
-                driver.add_cookie(cookie)
-            logger.info("Cookies loaded successfully")
+            with open("config/cookies.pkl", "rb") as f:
+                cookies = pickle.load(f)
+                for cookie in cookies:
+                    driver.add_cookie(cookie)
+            logger.info("🍪 Cookies injected")
         except FileNotFoundError:
-            logger.warning(
-                "cookies.pkl not found. You may need to login manually first."
-            )
+            logger.warning("⚠️ cookies.pkl not found. Manual login may be required.")
         except Exception as e:
-            logger.warning(f"Could not load cookies: {e}")
+            logger.warning(f"⚠️ Cookie injection failed: {e}")
 
         driver.get("https://www.linkedin.com/feed/")
-        logger.info("Navigated to LinkedIn feed")
-        time.sleep(5)
+        logger.info("➡️ Navigated to LinkedIn feed")
+        time.sleep(4)
 
         posts = driver.find_elements(By.CLASS_NAME, "feed-shared-update-v2")
-        logger.info(f"Found {len(posts)} posts to process")
+        logger.info(f"📄 Found {len(posts)} posts to process")
 
-        processed_count = 0
-        connected_count = 0
+        processed = connected = 0
 
         for i, post in enumerate(posts, 1):
             try:
-                logger.info(f"Processing post {i}/{len(posts)}")
+                logger.info(f"📌 Processing post {i}/{len(posts)}")
                 random_scroll(driver)
                 random_click(driver)
 
                 content = post.text[:300]
-                # Use decision engine to determine if we should connect
-                results = decision_engine.get_relevant_posts([content])
-                should_connect = results[0]["should_connect"] if results else False
+                result = decision_engine.get_relevant_posts([content])
+                should_connect = result[0]["should_connect"] if result else False
 
                 if should_connect:
-                    logger.info(f"Decision: Should connect - attempting connection")
+                    logger.info("🤝 Decision: Attempting to connect")
                     if try_connect(post):
                         log_to_sheet(post, content, "Connected")
-                        connected_count += 1
-                        logger.info("Successfully connected")
+                        connected += 1
+                        logger.info("✅ Connected")
                     else:
                         log_to_sheet(post, content, "Connect Not Found")
-                        logger.info("Connect button not found")
+                        logger.info("❌ Connect button not found")
                 else:
                     log_to_sheet(post, content, "Skipped")
-                    logger.info("Decision: Skipped post")
+                    logger.info("⏩ Skipped post")
 
-                processed_count += 1
-                sleep_time = random.uniform(3, 7)
-                logger.info(f"Waiting {sleep_time:.1f} seconds before next post")
-                time.sleep(sleep_time)
+                processed += 1
+                time.sleep(random.uniform(3, 7))
 
             except Exception as e:
-                logger.error(f"Error processing post {i}: {e}")
+                logger.error(f"⚠️ Error processing post {i}: {e}")
                 continue
 
         logger.info(
-            f"Bot session completed. Processed: {processed_count}, Connected: {connected_count}"
+            f"🏁 Session completed. Processed: {processed}, Connected: {connected}"
         )
 
     except Exception as e:
-        logger.error(f"Bot execution failed: {e}")
+        logger.error(f"❌ Bot execution failed: {e}")
 
     finally:
         if driver:
             driver.quit()
-            logger.info("Chrome driver closed")
-
-
-# def run_bot():
-
-#     logger.info("Starting LinkedIn bot...")
-
-#     # Kill any existing Chrome processes first
-#     try:
-#         os.system("pkill -f chrome")
-#         logger.info("Killed any existing Chrome processes")
-#         time.sleep(2)
-#     except Exception as e:
-#         logger.warning(f"Error killing Chrome processes: {e}")
-
-#     # Configure Chrome options with minimal settings
-#     chrome_options = Options()
-#     chrome_options.add_argument("--no-sandbox")
-#     chrome_options.add_argument("--disable-dev-shm-usage")
-#     chrome_options.add_argument("--disable-gpu")
-#     chrome_options.add_argument("--remote-debugging-port=0")  # Use random port
-#     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-#     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-#     chrome_options.add_experimental_option('useAutomationExtension', False)
-
-#     # Add user agent to look more like a real browser
-#     chrome_options.add_argument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-#     # Uncomment the next line if you want to run in headless mode (no GUI)
-#     # chrome_options.add_argument("--headless")
-
-#     driver = None
-#     try:
-#         # Create Chrome service
-#         service = Service()
-#         driver = webdriver.Chrome(service=service, options=chrome_options)
-#         driver.execute_script(
-#             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-#         )
-#         logger.info("Chrome driver initialized successfully")
-
-#         driver.get("https://www.linkedin.com/")
-#         logger.info("Navigated to LinkedIn homepage")
-#         time.sleep(3)
-
-#         # Inject cookies
-#         try:
-#             for cookie in pickle.load(open("config/cookies.pkl", "rb")):
-#                 driver.add_cookie(cookie)
-#             logger.info("Cookies loaded successfully")
-#         except FileNotFoundError:
-#             logger.warning(
-#                 "cookies.pkl not found. You may need to login manually first."
-#             )
-#         except Exception as e:
-#             logger.warning(f"Could not load cookies: {e}")
-
-#         driver.get("https://www.linkedin.com/feed/")
-#         logger.info("Navigated to LinkedIn feed")
-#         time.sleep(5)
-
-#         posts = driver.find_elements(By.CLASS_NAME, "feed-shared-update-v2")
-#         logger.info(f"Found {len(posts)} posts to process")
-
-#         processed_count = 0
-#         connected_count = 0
-
-#         for i, post in enumerate(posts, 1):
-#             try:
-#                 logger.info(f"Processing post {i}/{len(posts)}")
-#                 random_scroll(driver)
-#                 random_click(driver)
-
-#                 content = post.text[:300]
-#                 # Use decision engine to determine if we should connect
-#                 results = decision_engine.get_relevant_posts([content])
-#                 should_connect = results[0]["should_connect"] if results else False
-
-#                 if should_connect:
-#                     logger.info(f"Decision: Should connect - attempting connection")
-#                     if try_connect(post):
-#                         log_to_sheet(post, content, "Connected")
-#                         connected_count += 1
-#                         logger.info("Successfully connected")
-#                     else:
-#                         log_to_sheet(post, content, "Connect Not Found")
-#                         logger.info("Connect button not found")
-#                 else:
-#                     log_to_sheet(post, content, "Skipped")
-#                     logger.info("Decision: Skipped post")
-
-#                 processed_count += 1
-#                 sleep_time = random.uniform(3, 7)
-#                 logger.info(f"Waiting {sleep_time:.1f} seconds before next post")
-#                 time.sleep(sleep_time)
-
-#             except Exception as e:
-#                 logger.error(f"Error processing post {i}: {e}")
-#                 continue
-
-#         logger.info(
-#             f"Bot session completed. Processed: {processed_count}, Connected: {connected_count}"
-#         )
-
-#     except Exception as e:
-#         logger.error(f"Error during bot execution: {e}")
-#         raise
-#     finally:
-#         # Clean up resources
-#         if driver:
-#             try:
-#                 driver.quit()
-#                 logger.info("Chrome driver closed")
-#             except Exception as e:
-#                 logger.warning(f"Error closing driver: {e}")
-
-#         # Kill any remaining Chrome processes
-#         try:
-#             os.system("pkill -f chrome")
-#             logger.info("Cleaned up any remaining Chrome processes")
-#         except Exception as e:
-#             logger.warning(f"Error in final Chrome cleanup: {e}")
+            logger.info("🛑 Chrome closed cleanly")

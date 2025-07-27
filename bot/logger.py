@@ -1,8 +1,10 @@
 import gspread
+import logging
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from selenium.webdriver.common.by import By
 
+logger = logging.getLogger(__name__)
 
 def log_to_sheet(post, content, decision):
     try:
@@ -25,13 +27,13 @@ def log_to_sheet(post, content, decision):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         sheet.append_row([timestamp, name, content, decision])
-        print(f"Logged to sheet: {decision} - {name}")
+        logger.info(f"Logged to sheet: {decision} - {name}")
         
     except FileNotFoundError:
-        print("Warning: credentials.json not found. Logging to console instead.")
+        logger.warning("credentials.json not found. Logging to console instead.")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] {decision}: {content[:50]}...")
+        logger.info(f"[{timestamp}] {decision}: {content[:50]}...")
     except Exception as e:
-        print(f"Error logging to sheet: {e}")
+        logger.error(f"Error logging to sheet: {e}")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] {decision}: {content[:50]}...")
+        logger.info(f"[{timestamp}] {decision}: {content[:50]}...")

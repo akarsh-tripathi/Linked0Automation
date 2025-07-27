@@ -69,6 +69,7 @@ def run_bot():
 
         # Load LinkedIn and inject cookies
         driver.get("https://www.linkedin.com/")
+
         time.sleep(3)
         try:
             with open("config/cookies.pkl", "rb") as f:
@@ -82,6 +83,15 @@ def run_bot():
             logger.warning(f"⚠️ Cookie injection failed: {e}")
 
         driver.get("https://www.linkedin.com/feed/")
+
+        current_url = driver.current_url
+        if "login" in current_url or "checkpoint" in current_url:
+            logger.warning(f"🔒 Not logged in — redirected to: {current_url}")
+            logger.warning("❌ Skipping bot run due to unauthenticated session")
+            return
+        else:
+            logger.info(f"✅ Logged in. Landed on: {current_url}")
+
         logger.info("➡️ Navigated to LinkedIn feed")
         time.sleep(4)
 

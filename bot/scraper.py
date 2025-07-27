@@ -3,6 +3,7 @@ import pickle
 import random
 import logging
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from bot.connect import try_connect
 from bot.decision import DecisionEngine
@@ -18,8 +19,24 @@ decision_engine = DecisionEngine(PROMPT)
 
 def run_bot():
     logger.info("Starting LinkedIn bot...")
-    driver = webdriver.Chrome()
-    logger.info("Chrome driver initialized")
+    
+    # Configure Chrome options
+    chrome_options = Options()
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--remote-debugging-port=9222")
+    chrome_options.add_argument("--user-data-dir=/tmp/chrome_user_data")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # Uncomment the next line if you want to run in headless mode (no GUI)
+    # chrome_options.add_argument("--headless")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    logger.info("Chrome driver initialized with custom options")
     
     driver.get("https://www.linkedin.com/")
     logger.info("Navigated to LinkedIn homepage")

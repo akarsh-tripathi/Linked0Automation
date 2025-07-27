@@ -1,0 +1,3 @@
+config/cookies.pkl
+config/credentials.json
+*__pycache__/

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  linkedin-bot:
+    build: .
+    container_name: linkedin_auto_connect
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - DISPLAY=:99
+      - PYTHONUNBUFFERED=1
+    networks:
+      - linkedin-network
+    # Uncomment if you need to expose ports
+    # ports:
+    #   - "8080:8080"
+
+networks:
+  linkedin-network:
+    driver: bridge
+
+volumes:
+  config:
+  logs: 
